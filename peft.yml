@@ -1,4 +1,4 @@
-name: heft
+name: peft
 channels:
 - defaults
 dependencies:

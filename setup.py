@@ -7,19 +7,19 @@ with open(path.join(here, 'README.md'), encoding='utf-8') as f:
     long_description = f.read()
 
 setup(
-    name='heft',
+    name='peft',
     version='1.0.0',
-    description='A Python 3.6+ Implementation of HEFT (Heterogeneous Earliest Finish Time) DAG Scheduling Algorithm',
+    description='A Python 3.6+ Implementation of PEFT (Predict Earliest Finish Time) DAG Scheduling Algorithm',
     long_description=long_description,
     long_description_content_type='text/markdown',
-    url='https://github.com/mackncheesiest/heft',
+    url='https://github.com/mackncheesiest/peft',
     author='Joshua Mack',
     author_email='jmack2545@email.arizona.edu',
     classifiers=[
         'Programming Language :: Python :: 3.6',
         'Programming Language :: Python :: 3.7'
     ],
-    packages=['heft'],
+    packages=['peft'],
     install_requires=[
         'matplotlib',
         'numpy',
@@ -29,7 +29,7 @@ setup(
         'test': ['pytest']
     },
     project_urls={
-        'Bug Reports': 'https://github.com/mackncheesiest/heft/issues',
-        'Source': 'https://github.com/mackncheesiest/heft'
+        'Bug Reports': 'https://github.com/mackncheesiest/peft/issues',
+        'Source': 'https://github.com/mackncheesiest/peft'
     }
 )

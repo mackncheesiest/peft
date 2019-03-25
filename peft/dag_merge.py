@@ -1,5 +1,5 @@
 from enum import Enum, auto
-from heft import heft
+from peft import peft
 from math import inf
 from types import SimpleNamespace
 
@@ -60,7 +60,7 @@ def _ranking_based_merge(*args, **kwargs):
     for dag in args:
         # root_nodes.append(dag.nodes()[next(nx.topological_sort(dag))])
         root_nodes.append(next(nx.topological_sort(dag)))
-        heft._compute_ranku(_self, dag)
+        peft._compute_ranku(_self, dag)
         dag_max_ranks.append(dag.nodes()[root_nodes[-1]]['ranku'])
 
     if "skip_relabeling" in kwargs and kwargs["skip_relabeling"] is True:

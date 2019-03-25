@@ -2,7 +2,7 @@
 
 from collections import deque, namedtuple
 from math import inf
-from heft.gantt import showGanttChart
+from peft.gantt import showGanttChart
 from types import SimpleNamespace
 from enum import Enum
 
@@ -13,7 +13,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import networkx as nx
 
-logger = logging.getLogger('heft')
+logger = logging.getLogger('peft')
 
 ScheduleEvent = namedtuple('ScheduleEvent', 'task start end proc')
 
@@ -138,6 +138,9 @@ def schedule_dag(dag, computation_matrix=W0, communication_matrix=C0, proc_sched
 
     return _self.proc_schedules, _self.task_schedules, dict_output
     
+def _compute_optimistic_cost_table(_self, dag):
+    return np.array()
+
 def _compute_ranku(_self, dag, metric=RankMetric.MEAN):
     """
     Uses a basic BFS approach to traverse upwards through the graph assigning ranku along the way
@@ -336,7 +339,7 @@ def readDagMatrix(dag_file, show_dag=False):
     return dag
 
 def generate_argparser():
-    parser = argparse.ArgumentParser(description="A tool for finding HEFT schedules for given DAG task graphs")
+    parser = argparse.ArgumentParser(description="A tool for finding PEFT schedules for given DAG task graphs")
     parser.add_argument("-d", "--dag_file", 
                         help="File containing input DAG to be scheduled. Uses default 10 node dag from Topcuoglu 2002 if none given.", 
                         type=str, default="test/canonicalgraph_task_connectivity.csv")
