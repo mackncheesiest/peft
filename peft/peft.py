@@ -4,11 +4,9 @@ from collections import deque, namedtuple
 from math import inf
 from peft.gantt import showGanttChart
 from types import SimpleNamespace
-from enum import Enum
 
 import argparse
 import logging
-import sys
 import numpy as np
 import matplotlib.pyplot as plt
 import networkx as nx
@@ -18,24 +16,24 @@ logger = logging.getLogger('peft')
 ScheduleEvent = namedtuple('ScheduleEvent', 'task start end proc')
 
 """
-Default computation matrix - taken from Topcuoglu 2002 HEFT paper
+Default computation matrix - taken from Arabnejad 2014 PEFT paper
 computation matrix: v x q matrix with v tasks and q PEs
 """
 W0 = np.array([
-    [14, 16, 9],
-    [13, 19, 18],
-    [11, 13, 19],
-    [13, 8, 17],
-    [12, 13, 10],
-    [13, 16, 9],
-    [7, 15, 11],
-    [5, 11, 14],
-    [18, 12, 20],
-    [21, 7, 16]
+    [22, 21, 36],
+    [22, 18, 18],
+    [32, 27, 19],
+    [7, 10, 17],
+    [29, 27, 10],
+    [26, 17, 9],
+    [14, 25, 11],
+    [29, 23, 14],
+    [15, 21, 20],
+    [13, 16, 16]
 ])
 
 """
-Default communication matrix - not listed in Topcuoglu 2002 HEFT paper
+Default communication matrix - not listed in Arabnejad 2014 PEFT paper
 communication matrix: q x q matrix with q PEs
 
 Note that a communication cost of 0 is used for a given processor to itself
@@ -46,12 +44,7 @@ C0 = np.array([
     [1, 1, 0]
 ])
 
-class RankMetric(Enum):
-    MEAN = "MEAN"
-    WORST = "WORST"
-    BEST = "BEST"
-
-def schedule_dag(dag, computation_matrix=W0, communication_matrix=C0, proc_schedules=None, time_offset=0, relabel_nodes=True, rank_metric=RankMetric.MEAN):
+def schedule_dag(dag, computation_matrix=W0, communication_matrix=C0, proc_schedules=None, time_offset=0, relabel_nodes=True):
     """
     Given an application DAG and a set of matrices specifying PE bandwidth and (task, pe) execution times, computes the HEFT schedule
     of that DAG onto that set of PEs 
@@ -66,7 +59,8 @@ def schedule_dag(dag, computation_matrix=W0, communication_matrix=C0, proc_sched
         'proc_schedules': proc_schedules,
         'numExistingJobs': 0,
         'time_offset': time_offset,
-        'root_node': None
+        'root_node': None,
+        'optimistic_cost_table': None
     }
     _self = SimpleNamespace(**_self)
 
@@ -95,23 +89,26 @@ def schedule_dag(dag, computation_matrix=W0, communication_matrix=C0, proc_sched
     root_node = root_node[0]
     _self.root_node = root_node
 
-    logger.debug(""); logger.debug("====================== Performing Rank-U Computation ======================\n"); logger.debug("")
-    _compute_ranku(_self, dag, metric=rank_metric)
+    logger.debug(""); logger.debug("====================== Performing Optimistic Cost Table Computation ======================\n"); logger.debug("")
+    _self.optimistic_cost_table = _compute_optimistic_cost_table(_self, dag)
 
     logger.debug(""); logger.debug("====================== Computing EFT for each (task, processor) pair and scheduling in order of decreasing Rank-U ======================"); logger.debug("")
-    sorted_nodes = sorted(dag.nodes(), key=lambda node: dag.nodes()[node]['ranku'], reverse=True)
+    sorted_nodes = sorted(dag.nodes(), key=lambda node: dag.nodes()[node]['rank'], reverse=True)
     if sorted_nodes[0] != root_node:
         logger.debug("Root node was not the first node in the sorted list. Must be a zero-cost and zero-weight placeholder node. Rearranging it so it is scheduled first\n")
         idx = sorted_nodes.index(root_node)
         sorted_nodes[idx], sorted_nodes[0] = sorted_nodes[0], sorted_nodes[idx]
+    logger.debug(f"Scheduling tasks in this order: {sorted_nodes}")
     for node in sorted_nodes:
         if _self.task_schedules[node] is not None:
             continue
         minTaskSchedule = ScheduleEvent(node, inf, inf, -1)
+        minOptimisticCost = inf
         for proc in range(len(communication_matrix)):
             taskschedule = _compute_eft(_self, dag, node, proc)
-            if (taskschedule.end < minTaskSchedule.end):
+            if (taskschedule.end + _self.optimistic_cost_table[node][proc] < minTaskSchedule.end + minOptimisticCost):
                 minTaskSchedule = taskschedule
+                minOptimisticCost = _self.optimistic_cost_table[node][proc]
         _self.task_schedules[node] = minTaskSchedule
         _self.proc_schedules[minTaskSchedule.proc].append(minTaskSchedule)
         _self.proc_schedules[minTaskSchedule.proc] = sorted(_self.proc_schedules[minTaskSchedule.proc], key=lambda schedule_event: schedule_event.end)
@@ -139,18 +136,16 @@ def schedule_dag(dag, computation_matrix=W0, communication_matrix=C0, proc_sched
     return _self.proc_schedules, _self.task_schedules, dict_output
     
 def _compute_optimistic_cost_table(_self, dag):
-    return np.array()
+    """
+    Uses a basic BFS approach to traverse upwards through the graph building the optimistic cost table along the way
+    """
 
-def _compute_ranku(_self, dag, metric=RankMetric.MEAN):
-    """
-    Uses a basic BFS approach to traverse upwards through the graph assigning ranku along the way
-    """
+    optimistic_cost_table = {}
+
     terminal_node = [node for node in dag.nodes() if not any(True for _ in dag.successors(node))]
     assert len(terminal_node) == 1, f"Expected a single terminal node, found {len(terminal_node)}"
     terminal_node = terminal_node[0]
 
-    #TODO: Should this be configurable?
-    #avgCommunicationCost = np.mean(_self.communication_matrix[np.where(_self.communication_matrix > 0)])
     diagonal_mask = np.ones(_self.communication_matrix.shape, dtype=bool)
     np.fill_diagonal(diagonal_mask, 0)
     avgCommunicationCost = np.mean(_self.communication_matrix[diagonal_mask])
@@ -158,84 +153,51 @@ def _compute_ranku(_self, dag, metric=RankMetric.MEAN):
         logger.debug(f"Assigning {edge}'s average weight based on average communication cost. {float(dag.get_edge_data(*edge)['weight'])} => {float(dag.get_edge_data(*edge)['weight']) / avgCommunicationCost}")
         nx.set_edge_attributes(dag, { edge: float(dag.get_edge_data(*edge)['weight']) / avgCommunicationCost }, 'avgweight')
 
-    # Utilize a masked array so that np.mean, etc, calculations ignore the entries that are inf
-    comp_matrix_masked = np.ma.masked_where(_self.computation_matrix == inf, _self.computation_matrix)
-
-    nx.set_node_attributes(dag, { terminal_node: np.mean(comp_matrix_masked[terminal_node-_self.numExistingJobs]) }, "ranku")
+    optimistic_cost_table[terminal_node] = _self.computation_matrix.shape[1] * [0]
+    dag.node[terminal_node]['rank'] = 0
     visit_queue = deque(dag.predecessors(terminal_node))
-
+    
+    node_can_be_processed = lambda node: all(successor in optimistic_cost_table for successor in dag.successors(node))
     while visit_queue:
         node = visit_queue.pop()
-        while _node_can_be_processed(_self, dag, node) is not True:
+        optimistic_cost_table[node] = _self.computation_matrix.shape[1] * [0]
+
+        while node_can_be_processed(node) is not True:
             try:
                 node2 = visit_queue.pop()
             except IndexError:
                 raise RuntimeError(f"Node {node} cannot be processed, and there are no other nodes in the queue to process instead!")
             visit_queue.appendleft(node)
             node = node2
+        
+        logger.debug(f"Computing optimistic cost table entries for node: {node}")
 
-        logger.debug(f"Assigning ranku for node: {node}")
-        if metric == RankMetric.MEAN:
-            max_successor_ranku = -1
+        # Perform OCT kernel
+        # Need to build the OCT entries for every task on each processor
+        for curr_proc in range(_self.computation_matrix.shape[1]):
+            # Need to maximize over all the successor nodes
+            max_successor_oct = -inf
             for succnode in dag.successors(node):
                 logger.debug(f"\tLooking at successor node: {succnode}")
-                logger.debug(f"\tThe edge weight from node {node} to node {succnode} is {dag[node][succnode]['avgweight']}, and the ranku for node {node} is {dag.nodes()[succnode]['ranku']}")
-                val = float(dag[node][succnode]['avgweight']) + dag.nodes()[succnode]['ranku']
-                if val > max_successor_ranku:
-                    max_successor_ranku = val
-            assert max_successor_ranku >= 0, f"Expected maximum successor ranku to be greater or equal to 0 but was {max_successor_ranku}"
-            nx.set_node_attributes(dag, { node: np.mean(comp_matrix_masked[node-_self.numExistingJobs]) + max_successor_ranku }, "ranku")
-        elif metric == RankMetric.WORST:
-            max_successor_ranku = -1
-            max_node_idx = np.where(comp_matrix_masked[node-_self.numExistingJobs] == max(comp_matrix_masked[node-_self.numExistingJobs]))[0][0]
-            logger.debug(f"\tNode {node} has maximum computation cost of {comp_matrix_masked[node-_self.numExistingJobs][max_node_idx]} on processor {max_node_idx}")
-            for succnode in dag.successors(node):
-                logger.debug(f"\tLooking at successor node: {succnode}")
-                max_succ_idx = np.where(comp_matrix_masked[succnode-_self.numExistingJobs] == max(comp_matrix_masked[succnode-_self.numExistingJobs]))[0][0]
-                logger.debug(f"\tNode {succnode} has maximum computation cost of {comp_matrix_masked[succnode-_self.numExistingJobs][max_succ_idx]} on processor {max_succ_idx}")
-                val = _self.communication_matrix[max_node_idx, max_succ_idx] + dag.nodes()[succnode]['ranku']
-                if val > max_successor_ranku:
-                    max_successor_ranku = val
-            assert max_successor_ranku >= 0, f"Expected maximum successor ranku to be greater or equal to 0 but was {max_successor_ranku}"
-            nx.set_node_attributes(dag, { node: comp_matrix_masked[node-_self.numExistingJobs, max_node_idx] + max_successor_ranku}, "ranku")
-        elif metric == RankMetric.BEST:
-            min_successor_ranku = inf
-            min_node_idx = np.where(comp_matrix_masked[node-_self.numExistingJobs] == min(comp_matrix_masked[node-_self.numExistingJobs]))
-            logger.debug(f"\tNode {node} has minimum computation cost on processor {min_node_idx}")
-            for succnode in dag.successors(node):
-                logger.debug(f"\tLooking at successor node: {succnode}")
-                min_succ_idx = np.where(comp_matrix_masked[succnode-_self.numExistingJobs] == min(comp_matrix_masked[succnode-_self.numExistingJobs]))
-                logger.debug(f"\tThis successor node has minimum computation cost on processor {min_succ_idx}")
-                val = _self.communication_matrix[min_node_idx, min_succ_idx] + dag.nodes()[succnode]['ranku']
-                if val < min_successor_ranku:
-                    min_successor_ranku = val
-            assert min_successor_ranku >= 0, f"Expected minimum successor ranku to be greater or equal to 0 but was {min_successor_ranku}"
-            nx.set_node_attributes(dag, { node: comp_matrix_masked[node-_self.numExistingJobs, min_node_idx] + min_successor_ranku}, "ranku")
-        else:
-            raise RuntimeError(f"Unrecognied Rank-U metric {metric}, unable to compute upward rank")
-
+                # Need to minimize over the costs across each processor
+                min_proc_oct = inf
+                for succ_proc in range(_self.computation_matrix.shape[1]):
+                    successor_oct = optimistic_cost_table[succnode][succ_proc]
+                    successor_comp_cost = _self.computation_matrix[succnode][succ_proc]
+                    successor_comm_cost = dag[node][succnode]['avgweight'] if curr_proc != succ_proc else 0
+                    cost = successor_oct + successor_comp_cost + successor_comm_cost
+                    logger.debug(f"If node {node} is on {curr_proc} and successor {succnode} is on {succ_proc}, the optimistic cost entry is {cost}")
+                    if cost < min_proc_oct:
+                        min_proc_oct = cost
+                if min_proc_oct > max_successor_oct:
+                    max_successor_oct = min_proc_oct
+            assert max_successor_oct != -inf, f"No node should have a maximum successor OCT of {-inf} but {node} does when looking at processor {curr_proc}"
+            optimistic_cost_table[node][curr_proc] = max_successor_oct
+        # End OCT kernel
+        dag.node[node]['rank'] = np.mean(optimistic_cost_table[node])
         visit_queue.extendleft([prednode for prednode in dag.predecessors(node) if prednode not in visit_queue])
-    
-    logger.debug("")
-    for node in dag.nodes():
-        logger.debug(f"Node: {node}, Rank U: {dag.nodes()[node]['ranku']}")
 
-def _node_can_be_processed(_self, dag, node):
-    """
-    Validates that a node is able to be processed in Rank U calculations. Namely, that all of its successors have their Rank U values properly assigned
-    Otherwise, errors can occur in processing DAGs of the form
-    A
-    |\
-    | B
-    |/
-    C
-    Where C enqueues A and B, A is popped off, and it is unable to be processed because B's Rank U has not been computed
-    """
-    for succnode in dag.successors(node):
-        if 'ranku' not in dag.nodes()[succnode]:
-            logger.debug(f"Attempted to compute the Rank U for node {node} but found that it has an unprocessed successor {dag.nodes()[succnode]}. Will try with the next node in the queue")
-            return False
-    return True
+    return optimistic_cost_table
 
 def _compute_eft(_self, dag, node, proc):
     """
@@ -341,20 +303,17 @@ def readDagMatrix(dag_file, show_dag=False):
 def generate_argparser():
     parser = argparse.ArgumentParser(description="A tool for finding PEFT schedules for given DAG task graphs")
     parser.add_argument("-d", "--dag_file", 
-                        help="File containing input DAG to be scheduled. Uses default 10 node dag from Topcuoglu 2002 if none given.", 
-                        type=str, default="test/canonicalgraph_task_connectivity.csv")
+                        help="File containing input DAG to be scheduled. Uses default 10 node dag from Arabnejad 2014 if none given.",
+                        type=str, default="test/peftgraph_task_connectivity.csv")
     parser.add_argument("-p", "--pe_connectivity_file", 
-                        help="File containing connectivity/bandwidth information about PEs. Uses a default 3x3 matrix from Topcuoglu 2002 if none given.", 
-                        type=str, default="test/canonicalgraph_resource_BW.csv")
+                        help="File containing connectivity/bandwidth information about PEs. Uses a default 3x3 matrix from Arabnejad 2014 if none given.",
+                        type=str, default="test/peftgraph_resource_BW.csv")
     parser.add_argument("-t", "--task_execution_file", 
-                        help="File containing execution times of each task on each particular PE. Uses a default 10x3 matrix from Topcuoglu 2002 if none given.", 
-                        type=str, default="test/canonicalgraph_task_exe_time.csv")
+                        help="File containing execution times of each task on each particular PE. Uses a default 10x3 matrix from Arabnejad 2014 if none given.",
+                        type=str, default="test/peftgraph_task_exe_time.csv")
     parser.add_argument("-l", "--loglevel", 
                         help="The log level to be used in this module. Default: INFO", 
                         type=str, default="INFO", dest="loglevel", choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"])
-    parser.add_argument("--metric",
-                        help="Specify which metric to use when performing upward rank calculation",
-                        type=RankMetric, default=RankMetric.MEAN, dest="rank_metric", choices=list(RankMetric))
     parser.add_argument("--showDAG", 
                         help="Switch used to enable display of the incoming task DAG", 
                         dest="showDAG", action="store_true")
@@ -377,7 +336,7 @@ if __name__ == "__main__":
     computation_matrix = readCsvToNumpyMatrix(args.task_execution_file)
     dag = readDagMatrix(args.dag_file, args.showDAG) 
 
-    processor_schedules, _, _ = schedule_dag(dag, communication_matrix=communication_matrix, computation_matrix=computation_matrix, rank_metric=args.rank_metric)
+    processor_schedules, _, _ = schedule_dag(dag, communication_matrix=communication_matrix, computation_matrix=computation_matrix)
     for proc, jobs in processor_schedules.items():
         logger.info(f"Processor {proc} has the following jobs:")
         logger.info(f"\t{jobs}")
