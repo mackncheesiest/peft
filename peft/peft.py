@@ -162,7 +162,6 @@ def _compute_optimistic_cost_table(_self, dag):
     node_can_be_processed = lambda node: all(successor in optimistic_cost_table for successor in dag.successors(node))
     while visit_queue:
         node = visit_queue.pop()
-        optimistic_cost_table[node] = _self.computation_matrix.shape[1] * [0]
 
         while node_can_be_processed(node) is not True:
             try:
@@ -171,6 +170,8 @@ def _compute_optimistic_cost_table(_self, dag):
                 raise RuntimeError(f"Node {node} cannot be processed, and there are no other nodes in the queue to process instead!")
             visit_queue.appendleft(node)
             node = node2
+        
+        optimistic_cost_table[node] = _self.computation_matrix.shape[1] * [0]
         
         logger.debug(f"Computing optimistic cost table entries for node: {node}")
 
