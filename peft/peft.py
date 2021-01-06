@@ -154,7 +154,9 @@ def _compute_optimistic_cost_table(_self, dag):
         nx.set_edge_attributes(dag, { edge: float(dag.get_edge_data(*edge)['weight']) / avgCommunicationCost }, 'avgweight')
 
     optimistic_cost_table[terminal_node] = _self.computation_matrix.shape[1] * [0]
-    dag.node[terminal_node]['rank'] = 0
+    # lol whoops dag.node doesn't exist
+    #dag.node[terminal_node]['rank'] = 0
+    nx.set_node_attributes(dag, { terminal_node: 0 }, "rank")
     visit_queue = deque(dag.predecessors(terminal_node))
     
     node_can_be_processed = lambda node: all(successor in optimistic_cost_table for successor in dag.successors(node))
@@ -194,7 +196,9 @@ def _compute_optimistic_cost_table(_self, dag):
             assert max_successor_oct != -inf, f"No node should have a maximum successor OCT of {-inf} but {node} does when looking at processor {curr_proc}"
             optimistic_cost_table[node][curr_proc] = max_successor_oct
         # End OCT kernel
-        dag.node[node]['rank'] = np.mean(optimistic_cost_table[node])
+        # lol whoops dag.node doesn't exist
+        #dag.node[node]['rank'] = np.mean(optimistic_cost_table[node])
+        nx.set_node_attributes(dag, { node: np.mean(optimistic_cost_table[node]) }, "rank")
         visit_queue.extendleft([prednode for prednode in dag.predecessors(node) if prednode not in visit_queue])
 
     return optimistic_cost_table
