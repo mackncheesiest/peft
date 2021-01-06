@@ -1,6 +1,6 @@
 # PEFT: Predict Earliest Finish Time
 
-[![CircleCI](https://circleci.com/gh/mackncheesiest/peft.svg?style=svg)](https://circleci.com/gh/mackncheesiest/peft)
+[![Github Actions](https://github.com/mackncheesiest/peft/workflows/GH%20Actions/badge.svg)](https://github.com/mackncheesiest/peft/actions)
 
 A Python 3.6+ implementation of a heuristic DAG scheduling approach from 
 
@@ -9,9 +9,9 @@ A Python 3.6+ implementation of a heuristic DAG scheduling approach from
 [IEEE Explore Link](https://ieeexplore.ieee.org/document/6471969)
 
 ## Installation
-If you have conda installed, you can create an environment and fetch any necessary dependencies with
+Setting up a virtual environment first is recommended
 
-`conda env create -f peft.yml`
+After that, all necessary dependencies can be installed with `pip install -r requirements.txt`
 
 Otherwise, the main dependencies are:
 - Python 3.6+ (uses literal string interpolation)
@@ -19,7 +19,7 @@ Otherwise, the main dependencies are:
 - Numpy
 - Networkx
 - Pytest (development dependency only)
-- nb_conda (only if using a conda environment & want jupyter notebook to use the right python version)
+- nb\_conda (only if using a conda environment & want jupyter notebook to use the right python version)
 
 Finally, if you want it available as a local package for availability elsewhere on your system, it can be installed with `pip install .`
 
