@@ -91,14 +91,22 @@ def schedule_dag(dag, computation_matrix=W0, communication_matrix=C0, proc_sched
 
     logger.debug(""); logger.debug("====================== Performing Optimistic Cost Table Computation ======================\n"); logger.debug("")
     _self.optimistic_cost_table = _compute_optimistic_cost_table(_self, dag)
+    logger.debug(f"Computed the following OCT: {_self.optimistic_cost_table}")
 
     logger.debug(""); logger.debug("====================== Computing EFT for each (task, processor) pair and scheduling in order of decreasing Rank-U ======================"); logger.debug("")
     sorted_nodes = sorted(dag.nodes(), key=lambda node: dag.nodes()[node]['rank'], reverse=True)
     if sorted_nodes[0] != root_node:
         logger.debug("Root node was not the first node in the sorted list. Must be a zero-cost and zero-weight placeholder node. Rearranging it so it is scheduled first\n")
         idx = sorted_nodes.index(root_node)
-        sorted_nodes[idx], sorted_nodes[0] = sorted_nodes[0], sorted_nodes[idx]
+        # Cyclically rotate the sorted nodes between sorted_nodes[0] and sorted_nodes[idx]
+        # This ensures that relative ordering between nodes of equivalent rank (i.e. a child of a cost-zero parent) are preserved
+        # Namely, if all of these nodes are in front of the root node, then (I think) they must _all_ have the same cost and can thus be rotated freely
+        if idx > 1:
+            sorted_nodes[0:idx+1] = [sorted_nodes[idx]] + sorted_nodes[0:idx]
+        else:
+            sorted_nodes[idx], sorted_nodes[0] = sorted_nodes[0], sorted_nodes[idx]
     logger.debug(f"Scheduling tasks in this order: {sorted_nodes}")
+    logger.debug(f"The associated average OCT (i.e. rank) values are: {list(map(lambda node: dag.nodes()[node]['rank'], sorted_nodes))}")
     for node in sorted_nodes:
         if _self.task_schedules[node] is not None:
             continue
